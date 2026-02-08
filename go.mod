@@ -5,6 +5,8 @@ go 1.24
 require (
 	github.com/gogf/gf/contrib/nosql/redis/v2 v2.9.3
 	github.com/gogf/gf/v2 v2.9.3
+	github.com/redis/go-redis/v9 v9.12.1
+	golang.org/x/sync v0.16.0
 )
 
 require (
@@ -27,7 +29,6 @@ require (
 	github.com/olekukonko/errors v1.1.0 // indirect
 	github.com/olekukonko/ll v0.0.9 // indirect
 	github.com/olekukonko/tablewriter v1.0.9 // indirect
-	github.com/redis/go-redis/v9 v9.12.1 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
 	go.opentelemetry.io/otel v1.37.0 // indirect
