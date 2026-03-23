@@ -35,10 +35,13 @@ type StdLogger struct {
 
 // NewStdLogger 创建标准日志记录器
 func NewStdLogger() log.Logger {
+	defaultConfig := log.DefaultConfig()
 	return &StdLogger{
-		level:     log.LevelInfo,
+		level:     defaultConfig.Level,
+		config:    defaultConfig,
+		writers:   []io.Writer{os.Stdout},
 		fields:    make(map[string]interface{}),
-		callDepth: 3,
+		callDepth: defaultConfig.CallDepth,
 	}
 }
 
@@ -57,11 +60,7 @@ func (sl *StdLogger) log(level log.Level, msg string, fields ...interface{}) {
 	}
 
 	// 解析额外字段
-	for i := 0; i < len(fields); i += 2 {
-		if i+1 < len(fields) {
-			fieldMap[fields[i].(string)] = fields[i+1]
-		}
-	}
+	mergeFields(fieldMap, fields...)
 
 	// 获取调用者信息
 	var caller *log.CallerInfo
@@ -108,11 +107,7 @@ func (sl *StdLogger) logContext(ctx context.Context, level log.Level, msg string
 		fieldMap["trace_id"] = traceID
 	}
 
-	for i := 0; i < len(fields); i += 2 {
-		if i+1 < len(fields) {
-			fieldMap[fields[i].(string)] = fields[i+1]
-		}
-	}
+	mergeFields(fieldMap, fields...)
 
 	var caller *log.CallerInfo
 	if sl.config.Caller {
@@ -334,6 +329,9 @@ func (sl *StdLogger) SetConfig(config log.Config) error {
 	sl.mu.Lock()
 	defer sl.mu.Unlock()
 
+	// 先关闭旧的文件 writer，避免配置切换时句柄泄漏。
+	sl.closeOwnedWritersLocked()
+
 	sl.config = config
 	sl.level = config.Level
 
@@ -373,12 +371,8 @@ func (sl *StdLogger) GetConfig() log.Config {
 func (sl *StdLogger) Close() error {
 	sl.mu.Lock()
 	defer sl.mu.Unlock()
-
-	for _, w := range sl.writers {
-		if f, ok := w.(*os.File); ok {
-			f.Close()
-		}
-	}
+	sl.closeOwnedWritersLocked()
+	sl.writers = nil
 	return nil
 }
 
@@ -388,4 +382,30 @@ func (sl *StdLogger) Name() string {
 
 func init() {
 	log.Register("std", NewStdLogger)
+}
+
+func mergeFields(fieldMap map[string]interface{}, fields ...interface{}) {
+	for i := 0; i < len(fields); i += 2 {
+		if i+1 >= len(fields) {
+			break
+		}
+		key, ok := fields[i].(string)
+		if !ok || key == "" {
+			continue
+		}
+		fieldMap[key] = fields[i+1]
+	}
+}
+
+func (sl *StdLogger) closeOwnedWritersLocked() {
+	for _, w := range sl.writers {
+		f, ok := w.(*os.File)
+		if !ok {
+			continue
+		}
+		if f == os.Stdout || f == os.Stderr {
+			continue
+		}
+		_ = f.Close()
+	}
 }

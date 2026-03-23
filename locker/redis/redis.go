@@ -263,6 +263,13 @@ func (rl *redisLocker) Unlock(ctx context.Context) error {
 
 	if result.(int64) > 0 {
 		rl.locked = false
+		if rl.config.AutoClose {
+			rl.cancel()
+			rl.stopRefresh()
+			rl.manager.mu.Lock()
+			delete(rl.manager.locks, rl.token)
+			rl.manager.mu.Unlock()
+		}
 		return nil
 	}
 
@@ -349,9 +356,10 @@ func (rl *redisLocker) Key() string {
 // Close 关闭锁
 func (rl *redisLocker) Close() error {
 	rl.mu.Lock()
-	defer rl.mu.Unlock()
+	locked := rl.locked
+	rl.mu.Unlock()
 
-	if rl.locked {
+	if locked {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		_ = rl.Unlock(ctx)
 		cancel()
@@ -406,12 +414,19 @@ func (rl *redisLocker) stopRefresh() {
 // Close 关闭锁管理器
 func (rm *RedisManager) Close() error {
 	rm.mu.Lock()
-	defer rm.mu.Unlock()
-
+	locks := make([]*redisLocker, 0, len(rm.locks))
 	for _, l := range rm.locks {
+		locks = append(locks, l)
+	}
+	rm.mu.Unlock()
+
+	for _, l := range locks {
 		_ = l.Close()
 	}
+
+	rm.mu.Lock()
 	rm.locks = make(map[string]*redisLocker)
+	rm.mu.Unlock()
 
 	clientMu.Lock()
 	if globalClient != nil {

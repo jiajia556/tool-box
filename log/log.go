@@ -114,6 +114,20 @@ type FileConfig struct {
 	Compress  bool
 }
 
+// DefaultConfig 返回默认日志配置
+func DefaultConfig() Config {
+	return Config{
+		Level:      LevelInfo,
+		Format:     "text",
+		Output:     "stdout",
+		File:       FileConfig{Path: "app.log", MaxSize: 100, MaxAge: 30, MaxBackup: 7, Compress: false},
+		Caller:     false,
+		CallDepth:  3,
+		TimeFormat: "2006-01-02 15:04:05",
+		Encoder:    "text",
+	}
+}
+
 // WriterAdapter 日志写入适配器
 type WriterAdapter interface {
 	Write(entry *Entry) error
@@ -155,6 +169,9 @@ func Init(name string, config Config) error {
 	}
 
 	logger := instanceFunc()
+	if config == (Config{}) {
+		config = DefaultConfig()
+	}
 	if err := logger.SetConfig(config); err != nil {
 		return err
 	}
@@ -177,6 +194,9 @@ func InitNamed(name string, adapterName string, config Config) error {
 	}
 
 	logger := instanceFunc()
+	if config == (Config{}) {
+		config = DefaultConfig()
+	}
 	if err := logger.SetConfig(config); err != nil {
 		return err
 	}

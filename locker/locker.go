@@ -183,14 +183,23 @@ func New(key string, opts ...Option) Locker {
 	return globalManager.New(key, opts...)
 }
 
-// TryLock 尝试获取锁
-func TryLock(ctx context.Context, key string, opts ...Option) (bool, error) {
+// TryLock 尝试获取锁（非阻塞）
+// 成功时返回持有中的 Locker，调用方需要负责 Unlock/Close。
+func TryLock(ctx context.Context, key string, opts ...Option) (Locker, error) {
 	lock := New(key, opts...)
 	if lock == nil {
-		return false, fmt.Errorf("global manager not initialized")
+		return nil, fmt.Errorf("global manager not initialized")
 	}
-	defer lock.Close()
-	return lock.TryLock(ctx)
+	acquired, err := lock.TryLock(ctx)
+	if err != nil {
+		lock.Close()
+		return nil, err
+	}
+	if !acquired {
+		lock.Close()
+		return nil, ErrLockFailed
+	}
+	return lock, nil
 }
 
 // Lock 获取锁（阻塞）

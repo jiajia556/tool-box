@@ -52,6 +52,10 @@ func Init(adapterName string, config ...any) (err error) {
 	return
 }
 
+func SetGlobal(cache Cache) {
+	global = cache
+}
+
 func Register(name string, adapter Instance) {
 	adaptersMu.Lock()
 	defer adaptersMu.Unlock()

@@ -131,10 +131,15 @@ func (ml *memoryLocker) Unlock(ctx context.Context) error {
 
 // TTL 获取锁的剩余时间
 func (ml *memoryLocker) TTL(ctx context.Context) (time.Duration, error) {
-	ml.mu.Lock()
-	defer ml.mu.Unlock()
+	ml.manager.mu.RLock()
+	defer ml.manager.mu.RUnlock()
 
 	if !ml.locked {
+		return 0, locker.ErrLockNotHeld
+	}
+
+	existingLock, ok := ml.manager.locks[ml.key]
+	if !ok || existingLock.token != ml.token {
 		return 0, locker.ErrLockNotHeld
 	}
 
@@ -176,7 +181,10 @@ func (ml *memoryLocker) Close() error {
 	defer ml.manager.mu.Unlock()
 
 	if ml.locked {
-		delete(ml.manager.locks, ml.key)
+		existingLock, ok := ml.manager.locks[ml.key]
+		if ok && existingLock.token == ml.token {
+			delete(ml.manager.locks, ml.key)
+		}
 		ml.locked = false
 	}
 
