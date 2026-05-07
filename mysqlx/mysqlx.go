@@ -56,8 +56,8 @@ func InitMysql(conf MysqlConfig) error {
 		Loc:       time.Local,
 		ParseTime: true,
 		Params: map[string]string{
-			"charset":             conf.Charset,
-			"allowNativePassword": "true",
+			"charset":              conf.Charset,
+			"allowNativePasswords": "true",
 		},
 	}
 
