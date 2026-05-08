@@ -121,7 +121,7 @@ func DefaultConfig() Config {
 		Format:     "text",
 		Output:     "stdout",
 		File:       FileConfig{Path: "app.log", MaxSize: 100, MaxAge: 30, MaxBackup: 7, Compress: false},
-		Caller:     false,
+		Caller:     true,
 		CallDepth:  3,
 		TimeFormat: "2006-01-02 15:04:05",
 		Encoder:    "text",

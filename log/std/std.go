@@ -142,12 +142,21 @@ func (sl *StdLogger) getCallerInfo(depth int) *log.CallerInfo {
 
 	fn := runtime.FuncForPC(pc)
 	funcName := fn.Name()
+
 	if idx := strings.LastIndex(funcName, "/"); idx >= 0 {
 		funcName = funcName[idx+1:]
 	}
 
+	// 获取工作目录
+	wd, err := os.Getwd()
+	if err == nil {
+		if rel, err := filepath.Rel(wd, file); err == nil {
+			file = rel
+		}
+	}
+
 	return &log.CallerInfo{
-		File:     filepath.Base(file),
+		File:     filepath.ToSlash(file),
 		Line:     line,
 		Function: funcName,
 	}
