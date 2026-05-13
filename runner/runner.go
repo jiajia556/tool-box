@@ -52,9 +52,91 @@ func (r *Runner) Add(task func(context.Context)) {
 func (r *Runner) TrackAdd(delta int) { r.tracked.Add(delta) }
 func (r *Runner) TrackDone()         { r.tracked.Done() }
 
+// Tracker allows tasks to report async work for shutdown coordination.
+type Tracker interface {
+	TrackAdd(delta int)
+	TrackDone()
+}
+
+type trackerKey struct{}
+
+// WithTracker attaches a Tracker to the context for task use.
+func WithTracker(ctx context.Context, t Tracker) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, trackerKey{}, t)
+}
+
+// TrackerFromContext returns the Tracker stored in context.
+func TrackerFromContext(ctx context.Context) (Tracker, bool) {
+	if ctx == nil {
+		return nil, false
+	}
+	v := ctx.Value(trackerKey{})
+	if v == nil {
+		return nil, false
+	}
+	t, ok := v.(Tracker)
+	return t, ok
+}
+
+// TrackAdd reports new tracked work if a Tracker exists in context.
+func TrackAdd(ctx context.Context, delta int) bool {
+	t, ok := TrackerFromContext(ctx)
+	if !ok {
+		return false
+	}
+	t.TrackAdd(delta)
+	return true
+}
+
+// TrackDone marks a tracked unit as done if a Tracker exists in context.
+func TrackDone(ctx context.Context) bool {
+	t, ok := TrackerFromContext(ctx)
+	if !ok {
+		return false
+	}
+	t.TrackDone()
+	return true
+}
+
+// SafeTrackAdd is like TrackAdd but recovers from counter panics.
+func SafeTrackAdd(ctx context.Context, delta int) (ok bool) {
+	t, ok := TrackerFromContext(ctx)
+	if !ok {
+		return false
+	}
+	defer func() {
+		if recover() != nil {
+			ok = false
+		}
+	}()
+	t.TrackAdd(delta)
+	return true
+}
+
+// SafeTrackDone is like TrackDone but recovers from counter panics.
+func SafeTrackDone(ctx context.Context) (ok bool) {
+	t, ok := TrackerFromContext(ctx)
+	if !ok {
+		return false
+	}
+	defer func() {
+		if recover() != nil {
+			ok = false
+		}
+	}()
+	t.TrackDone()
+	return true
+}
+
 func (r *Runner) Run(ctx context.Context) error {
 	if r.interval <= 0 {
 		return errors.New("runner: interval must be > 0")
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 
 	ctx, stop := signal.NotifyContext(ctx,
@@ -98,6 +180,8 @@ func (r *Runner) runOnce(ctx context.Context) error {
 		return ctx.Err()
 	default:
 	}
+
+	ctx = WithTracker(ctx, r)
 
 	r.logf("start")
 

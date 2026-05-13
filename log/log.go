@@ -159,9 +159,13 @@ func Register(name string, adapter Instance) {
 }
 
 // Init 初始化全局日志记录器
-func Init(name string, config Config) error {
+func Init(config Config, name ...string) error {
+	if len(name) == 0 {
+		name = make([]string, 1)
+		name[0] = "std"
+	}
 	adaptersLock.RLock()
-	instanceFunc, ok := adapters[name]
+	instanceFunc, ok := adapters[name[0]]
 	adaptersLock.RUnlock()
 
 	if !ok {
