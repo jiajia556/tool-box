@@ -34,29 +34,29 @@ func (r *RedisCache) key(k string) string {
 
 // ---------------- basic ----------------
 
-func (r *RedisCache) Get(key string) (any, bool) {
+func (r *RedisCache) Get(key string) (any, error) {
 	b, err := r.client.Get(r.ctx, r.key(key)).Bytes()
 	if err == redis.Nil {
 		r.stats.Misses++
-		return nil, false
+		return nil, cache.ErrNotFound
 	}
 	if err != nil {
 		r.stats.Misses++
-		return nil, false
+		return nil, cache.ErrNotFound
 	}
 
 	var v any
 	if err := json.Unmarshal(b, &v); err != nil {
 		r.stats.Misses++
-		return nil, false
+		return nil, cache.ErrDecode
 	}
 
 	r.stats.Hits++
-	return v, true
+	return v, nil
 }
 
 func (r *RedisCache) Set(key string, value any, ttl time.Duration) {
-	if ttl <= 0 {
+	if ttl < 0 {
 		ttl = r.opts.DefaultTTL
 	}
 

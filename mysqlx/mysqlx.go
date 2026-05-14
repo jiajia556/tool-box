@@ -194,6 +194,13 @@ func (m *TxSession) InTx(fn func(tx *gorm.DB) error) (err error) {
 	return fn(m.tx)
 }
 
+func (m *TxSession) IsInTransaction() bool {
+	if m == nil {
+		return false
+	}
+	return m.tx != nil
+}
+
 // DB returns the *gorm.DB that should be used currently:
 // - if a transaction is active: return the transactional handle
 // - otherwise: return the base connection

@@ -40,7 +40,7 @@ func (f *FileCache) ensureDir() error {
 	return os.MkdirAll(f.dir, 0755)
 }
 
-func (f *FileCache) Get(key string) (any, bool) {
+func (f *FileCache) Get(key string) (any, error) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 
@@ -48,13 +48,13 @@ func (f *FileCache) Get(key string) (any, bool) {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		f.stats.Misses++
-		return nil, false
+		return nil, cache.ErrNotFound
 	}
 
 	var item fileItem
 	if err := json.Unmarshal(data, &item); err != nil {
 		f.stats.Misses++
-		return nil, false
+		return nil, cache.ErrDecode
 	}
 
 	// 检查是否过期
@@ -64,17 +64,17 @@ func (f *FileCache) Get(key string) (any, bool) {
 		go func() {
 			_ = os.Remove(filePath)
 		}()
-		return nil, false
+		return nil, cache.ErrNotFound
 	}
 
 	var v any
 	if err := json.Unmarshal(item.Value, &v); err != nil {
 		f.stats.Misses++
-		return nil, false
+		return nil, cache.ErrDecode
 	}
 
 	f.stats.Hits++
-	return v, true
+	return v, nil
 }
 
 func (f *FileCache) Set(key string, value any, ttl time.Duration) {

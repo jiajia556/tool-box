@@ -11,4 +11,5 @@ type Model interface {
 type Session interface {
 	DB() *gorm.DB
 	CreateTableIfNotExists(table Model) error
+	IsInTransaction() bool
 }

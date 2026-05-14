@@ -26,30 +26,30 @@ func NewMemoryCache() cache.Cache {
 	}
 }
 
-func (m *MemoryCache) Get(key string) (any, bool) {
+func (m *MemoryCache) Get(key string) (any, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	item, ok := m.items[key]
 	if !ok {
 		m.stats.Misses++
-		return nil, false
+		return nil, cache.ErrNotFound
 	}
 
 	// 检查是否过期
 	if !item.Expiration.IsZero() && time.Now().After(item.Expiration) {
 		m.stats.Misses++
-		return nil, false
+		return nil, cache.ErrNotFound
 	}
 
 	var v any
 	if err := json.Unmarshal(item.Value, &v); err != nil {
 		m.stats.Misses++
-		return nil, false
+		return nil, cache.ErrDecode
 	}
 
 	m.stats.Hits++
-	return v, true
+	return v, nil
 }
 
 func (m *MemoryCache) Set(key string, value any, ttl time.Duration) {
