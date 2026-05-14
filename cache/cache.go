@@ -3,6 +3,7 @@ package cache
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"sync"
 	"time"
 )
@@ -87,12 +88,19 @@ func Get[T any](key string) (T, error) {
 		return zero, err
 	}
 
-	tv, ok := v.(T)
-	if !ok {
-		return zero, fmt.Errorf("%w: value type %T", ErrTypeMismatch, v)
+	if tv, ok := v.(T); ok {
+		return tv, nil
 	}
 
-	return tv, nil
+	target := reflect.TypeOf((*T)(nil)).Elem()
+	if v != nil {
+		rv := reflect.ValueOf(v)
+		if rv.Type().ConvertibleTo(target) {
+			return rv.Convert(target).Interface().(T), nil
+		}
+	}
+
+	return zero, fmt.Errorf("%w: value type %T", ErrTypeMismatch, v)
 }
 
 func Set[T any](key string, value T, ttl time.Duration) {
