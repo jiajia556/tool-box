@@ -2,11 +2,14 @@ package std
 
 import (
 	"context"
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +25,10 @@ const (
 	colorBlue   = "\033[34m"
 	colorGray   = "\033[37m"
 )
+
+// 内部保留 key：用于保存“未配对的单个 field”。
+// 注意：输出时不会打印这个 key（text/pretty 会只打印 value；json 会输出到 "extras" 字段）。
+const unpairedFieldKey = "__unpaired_field"
 
 // StdLogger 标准日志记录器实现
 type StdLogger struct {
@@ -55,12 +62,23 @@ func (sl *StdLogger) log(level log.Level, msg string, fields ...interface{}) {
 
 	// 合并字段
 	fieldMap := make(map[string]interface{})
-	for k, v := range sl.fields {
-		fieldMap[k] = v
+	orderedFields := make([]log.Field, 0, len(sl.fields)+len(fields)/2+1)
+	// 先放入 logger 自带字段（map 无法保证顺序，这里做一个稳定排序，确保输出确定性）
+	if len(sl.fields) > 0 {
+		keys := make([]string, 0, len(sl.fields))
+		for k := range sl.fields {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			v := sl.fields[k]
+			fieldMap[k] = v
+			orderedFields = append(orderedFields, log.Field{Key: k, Value: v})
+		}
 	}
 
-	// 解析额外字段
-	mergeFields(fieldMap, fields...)
+	// 解析额外字段（严格按传入顺序追加）
+	orderedFields = append(orderedFields, mergeFields(fieldMap, fields...)...)
 
 	// 获取调用者信息
 	var caller *log.CallerInfo
@@ -73,6 +91,7 @@ func (sl *StdLogger) log(level log.Level, msg string, fields ...interface{}) {
 		Level:   level,
 		Message: msg,
 		Fields:  fieldMap,
+		OrderedFields: orderedFields,
 		Caller:  caller,
 	}
 
@@ -98,16 +117,27 @@ func (sl *StdLogger) logContext(ctx context.Context, level log.Level, msg string
 	defer sl.mu.Unlock()
 
 	fieldMap := make(map[string]interface{})
-	for k, v := range sl.fields {
-		fieldMap[k] = v
+	orderedFields := make([]log.Field, 0, len(sl.fields)+len(fields)/2+2)
+	if len(sl.fields) > 0 {
+		keys := make([]string, 0, len(sl.fields))
+		for k := range sl.fields {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			v := sl.fields[k]
+			fieldMap[k] = v
+			orderedFields = append(orderedFields, log.Field{Key: k, Value: v})
+		}
 	}
 
 	// 从上下文提取 trace id
 	if traceID := ctx.Value("trace_id"); traceID != nil {
 		fieldMap["trace_id"] = traceID
+		orderedFields = append(orderedFields, log.Field{Key: "trace_id", Value: traceID})
 	}
 
-	mergeFields(fieldMap, fields...)
+	orderedFields = append(orderedFields, mergeFields(fieldMap, fields...)...)
 
 	var caller *log.CallerInfo
 	if sl.config.Caller {
@@ -119,6 +149,7 @@ func (sl *StdLogger) logContext(ctx context.Context, level log.Level, msg string
 		Level:   level,
 		Message: msg,
 		Fields:  fieldMap,
+		OrderedFields: orderedFields,
 		Caller:  caller,
 		Ctx:     ctx,
 	}
@@ -174,9 +205,24 @@ func (sl *StdLogger) writeEntry(entry *log.Entry) {
 		output = sl.formatText(entry)
 	}
 
-	for _, w := range sl.writers {
-		fmt.Fprint(w, output)
+	writers := sl.writers
+	// 当日志级别为 DEBUG 时，无论输出配置是什么，都同时输出到控制台(stdout)。
+	if entry.Level == log.LevelDebug && !hasWriter(writers, os.Stdout) {
+		writers = append(append([]io.Writer(nil), writers...), os.Stdout)
 	}
+
+	for _, w := range writers {
+		_, _ = fmt.Fprint(w, output)
+	}
+}
+
+func hasWriter(writers []io.Writer, target io.Writer) bool {
+	for _, w := range writers {
+		if w == target {
+			return true
+		}
+	}
+	return false
 }
 
 func (sl *StdLogger) formatText(entry *log.Entry) string {
@@ -187,13 +233,13 @@ func (sl *StdLogger) formatText(entry *log.Entry) string {
 
 	levelStr := entry.Level.String()
 	msg := timeStr + " " + levelStr + " " + entry.Message
-
 	if entry.Caller != nil {
-		msg += fmt.Sprintf(" (%s:%d)", entry.Caller.File, entry.Caller.Line)
+		// 将调用位置放到最前边
+		msg = fmt.Sprintf("(%s:%d) %s", entry.Caller.File, entry.Caller.Line, msg)
 	}
 
 	if len(entry.Fields) > 0 {
-		msg += " " + sl.formatFields(entry.Fields)
+		msg += " " + sl.formatFields(entry)
 	}
 
 	return msg + "\n"
@@ -209,45 +255,128 @@ func (sl *StdLogger) formatPretty(entry *log.Entry) string {
 	levelColor := sl.getLevelColor(entry.Level)
 
 	msg := fmt.Sprintf("%s [%s%s%s] %s", timeStr, levelColor, levelStr, colorReset, entry.Message)
-
 	if entry.Caller != nil {
-		msg += fmt.Sprintf(" %s(%s:%d)%s", colorGray, entry.Caller.File, entry.Caller.Line, colorReset)
+		// 将调用位置放到最前边
+		msg = fmt.Sprintf("%s(%s:%d)%s %s", colorGray, entry.Caller.File, entry.Caller.Line, colorReset, msg)
 	}
 
 	if len(entry.Fields) > 0 {
-		msg += " " + sl.formatFields(entry.Fields)
+		msg += " " + sl.formatFields(entry)
 	}
 
 	return msg + "\n"
 }
 
 func (sl *StdLogger) formatJSON(entry *log.Entry) string {
-	// 简化的 JSON 格式，实际使用中可用 encoding/json
 	timeStr := entry.Time.Format(sl.config.TimeFormat)
 	if timeStr == "" {
 		timeStr = entry.Time.Format("2006-01-02T15:04:05Z07:00")
 	}
 
-	fields := fmt.Sprintf("{\"timestamp\":\"%s\",\"level\":\"%s\",\"message\":\"%s\"",
-		timeStr, entry.Level.String(), escapeJSON(entry.Message))
+	// JSON 输出：使用有序字段构造 JSON 字符串，保证输出顺序稳定且尽量贴近调用顺序。
+	// 说明：JSON 语义上对象 key 无序，但这里保证输出字符串顺序。
+	var buf bytes.Buffer
+	buf.WriteByte('{')
+	first := true
+	writeKV := func(k string, v interface{}) bool {
+		kb, err := json.Marshal(k)
+		if err != nil {
+			return false
+		}
+		vb, err := json.Marshal(v)
+		if err != nil {
+			return false
+		}
+		if !first {
+			buf.WriteByte(',')
+		}
+		first = false
+		buf.Write(kb)
+		buf.WriteByte(':')
+		buf.Write(vb)
+		return true
+	}
 
+	if !writeKV("timestamp", timeStr) || !writeKV("level", entry.Level.String()) || !writeKV("message", entry.Message) {
+		return sl.formatText(entry)
+	}
 	if entry.Caller != nil {
-		fields += fmt.Sprintf(",\"caller\":\"%s:%d\"", entry.Caller.File, entry.Caller.Line)
+		if !writeKV("caller", fmt.Sprintf("%s:%d", entry.Caller.File, entry.Caller.Line)) {
+			return sl.formatText(entry)
+		}
 	}
 
-	for k, v := range entry.Fields {
-		fields += fmt.Sprintf(",\"%s\":%v", k, v)
+	// 常规 key=value 按顺序输出；extra 收集后放到 extras
+	var extras []interface{}
+	if len(entry.OrderedFields) > 0 {
+		for _, f := range entry.OrderedFields {
+			if f.IsExtra {
+				extras = append(extras, f.Value)
+				continue
+			}
+			if f.Key == "" {
+				continue
+			}
+			if !writeKV(f.Key, f.Value) {
+				return sl.formatText(entry)
+			}
+		}
+	} else if len(entry.Fields) > 0 {
+		// 兼容：没有 OrderedFields 时仍输出 map（顺序不可控）
+		for k, v := range entry.Fields {
+			if k == unpairedFieldKey {
+				extras = append(extras, v)
+				continue
+			}
+			if !writeKV(k, v) {
+				return sl.formatText(entry)
+			}
+		}
 	}
 
-	fields += "}\n"
-	return fields
+	if len(extras) == 1 {
+		if !writeKV("extras", extras[0]) {
+			return sl.formatText(entry)
+		}
+	} else if len(extras) > 1 {
+		if !writeKV("extras", extras) {
+			return sl.formatText(entry)
+		}
+	}
+
+	buf.WriteByte('}')
+	buf.WriteByte('\n')
+	return buf.String()
 }
 
-func (sl *StdLogger) formatFields(fields map[string]interface{}) string {
+func (sl *StdLogger) formatFields(entry *log.Entry) string {
+	// 优先使用有序字段输出
+	if len(entry.OrderedFields) > 0 {
+		parts := make([]string, 0, len(entry.OrderedFields))
+		for _, f := range entry.OrderedFields {
+			if f.IsExtra {
+				parts = append(parts, fmt.Sprintf("%v", f.Value))
+				continue
+			}
+			if f.Key == "" {
+				continue
+			}
+			parts = append(parts, fmt.Sprintf("%s=%v", f.Key, f.Value))
+		}
+		return strings.Join(parts, " ")
+	}
+
+	// 兼容：没有 OrderedFields 时回退 map（顺序不可控）
 	var parts []string
-	for k, v := range fields {
+	var extras []string
+	for k, v := range entry.Fields {
+		if k == unpairedFieldKey {
+			extras = append(extras, fmt.Sprintf("%v", v))
+			continue
+		}
 		parts = append(parts, fmt.Sprintf("%s=%v", k, v))
 	}
+	parts = append(parts, extras...)
 	return strings.Join(parts, " ")
 }
 
@@ -264,10 +393,6 @@ func (sl *StdLogger) getLevelColor(level log.Level) string {
 	default:
 		return colorReset
 	}
-}
-
-func escapeJSON(s string) string {
-	return strings.ReplaceAll(strings.ReplaceAll(s, "\\", "\\\\"), "\"", "\\\"")
 }
 
 // 实现 Logger 接口方法
@@ -310,18 +435,25 @@ func (sl *StdLogger) PanicContext(ctx context.Context, msg string, fields ...int
 
 func (sl *StdLogger) WithFields(fields map[string]interface{}) log.Logger {
 	sl.mu.Lock()
-	newFields := make(map[string]interface{})
+	defer sl.mu.Unlock()
+
+	newFields := make(map[string]interface{}, len(sl.fields)+len(fields))
 	for k, v := range sl.fields {
 		newFields[k] = v
 	}
 	for k, v := range fields {
 		newFields[k] = v
 	}
-	sl.mu.Unlock()
 
-	newLogger := *sl
-	newLogger.fields = newFields
-	return &newLogger
+	// 不要复制 mutex（复制后可能导致未定义行为），直接构造一个新的 logger。
+	newWriters := append([]io.Writer(nil), sl.writers...)
+	return &StdLogger{
+		level:     sl.level,
+		config:    sl.config,
+		writers:   newWriters,
+		fields:    newFields,
+		callDepth: sl.callDepth,
+	}
 }
 
 func (sl *StdLogger) With(key string, value interface{}) log.Logger {
@@ -393,7 +525,28 @@ func init() {
 	log.Register("std", NewStdLogger)
 }
 
-func mergeFields(fieldMap map[string]interface{}, fields ...interface{}) {
+
+func mergeFields(fieldMap map[string]interface{}, fields ...interface{}) []log.Field {
+	ordered := make([]log.Field, 0, len(fields)/2+1)
+	var unpaired interface{}
+	hasUnpaired := false
+	if len(fields)%2 == 1 {
+		extra := fields[len(fields)-1]
+		unpaired = extra
+		hasUnpaired = true
+		fields = fields[:len(fields)-1]
+		if existing, ok := fieldMap[unpairedFieldKey]; ok {
+			switch v := existing.(type) {
+			case []interface{}:
+				fieldMap[unpairedFieldKey] = append(v, extra)
+			default:
+				fieldMap[unpairedFieldKey] = []interface{}{v, extra}
+			}
+		} else {
+			fieldMap[unpairedFieldKey] = extra
+		}
+	}
+
 	for i := 0; i < len(fields); i += 2 {
 		if i+1 >= len(fields) {
 			break
@@ -403,7 +556,15 @@ func mergeFields(fieldMap map[string]interface{}, fields ...interface{}) {
 			continue
 		}
 		fieldMap[key] = fields[i+1]
+		ordered = append(ordered, log.Field{Key: key, Value: fields[i+1]})
 	}
+
+	// 孤立 field 严格保持在最后输出
+	if hasUnpaired {
+		ordered = append(ordered, log.Field{IsExtra: true, Value: unpaired})
+	}
+
+	return ordered
 }
 
 func (sl *StdLogger) closeOwnedWritersLocked() {

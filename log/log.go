@@ -45,10 +45,22 @@ type Entry struct {
 	Level     Level
 	Message   string
 	Fields    map[string]interface{}
+	// OrderedFields 用于保留字段输出顺序（严格按代码传入顺序）。
+	// 适配器可优先使用该字段来格式化输出。
+	OrderedFields []Field
 	Caller    *CallerInfo
 	Stack     string
 	Ctx       context.Context
 	LoggerKey string
+}
+
+// Field 表示一个有序字段。
+// - Key/Value: 常规键值对
+// - IsExtra: 表示“未配对的单独 field”（只输出 Value，不输出 key）
+type Field struct {
+	Key     string
+	Value   interface{}
+	IsExtra bool
 }
 
 // CallerInfo 调用者信息
