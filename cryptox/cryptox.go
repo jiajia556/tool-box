@@ -25,10 +25,10 @@ const (
 type KDFParams struct {
 	// scrypt 参数：越大越慢越安全（也更耗 CPU/内存）
 	// 这里给一套偏“通用后端”的默认值；你也可以按设备能力调。
-	N       int // CPU/memory cost，必须是 2^k 且 > 1
-	R       int // block size
-	P       int // parallelization
-	KeyLen  int // 32 for AES-256 / ChaCha20
+	N       int // CPU/内存成本，必须是 2^k 且 > 1
+	R       int // 块大小
+	P       int // 并行度
+	KeyLen  int // AES-256 / ChaCha20 的 key 长度（通常为 32）
 	SaltLen int
 }
 
@@ -64,11 +64,11 @@ func EncryptWithPassword(alg Alg, password string, plaintext []byte, opts ...Opt
 		return nil, errors.New("password is empty")
 	}
 
-	aead, nonceLen, err := newAEAD(alg, nil) // 先拿 nonceLen
+	aead, nonceLen, err := newAEAD(alg, nil)
 	if err != nil {
 		return nil, err
 	}
-	_ = aead // 这里先不用
+	_ = aead
 
 	salt := make([]byte, o.kdf.SaltLen)
 	if _, err := io.ReadFull(rand.Reader, salt); err != nil {
@@ -92,7 +92,7 @@ func EncryptWithPassword(alg Alg, password string, plaintext []byte, opts ...Opt
 
 	ciphertext := aead.Seal(nil, nonce, plaintext, nil)
 
-	// wire format:
+	// 数据格式：
 	// magic(4) + ver(1) + alg(1) + saltLen(1) + nonceLen(1) + salt + nonce + ciphertext
 	out := make([]byte, 0, 4+1+1+1+1+len(salt)+len(nonce)+len(ciphertext))
 	out = append(out, 'C', 'X', 'P', 'W') // CryptoX PassWord
@@ -153,7 +153,7 @@ func DecryptWithPassword(password string, data []byte, opts ...Option) ([]byte, 
 		return nil, err
 	}
 
-	// gcm/open 会做认证校验：密码不对或数据被篡改会返回 error
+	// GCM/Open 会做认证校验：密码不对或数据被篡改会返回 error。
 	return aead.Open(nil, nonce, ciphertext, nil)
 }
 
@@ -182,9 +182,9 @@ func DecryptStringWithPassword(password, b64 string, opts ...Option) (string, er
 func newAEAD(alg Alg, key []byte) (cipher.AEAD, int, error) {
 	switch alg {
 	case AESGCM:
-		// AES-256-GCM：key 32 bytes（也可 16/24/32，但我们统一用 32）
+		// AES-256-GCM：key 长度 32 bytes（也可 16/24/32，但这里统一用 32）。
 		if key == nil {
-			// 仅用于获取 nonce size
+			// 仅用于获取 nonce size。
 			block, _ := aes.NewCipher(make([]byte, 32))
 			g, _ := cipher.NewGCM(block)
 			return g, g.NonceSize(), nil

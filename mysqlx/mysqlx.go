@@ -26,7 +26,7 @@ type MysqlConfig struct {
 	LogLevel        logger.LogLevel `json:"log_level" yaml:"log_level"`
 	AutoCreateTable bool            `json:"auto_create_table" yaml:"auto_create_table"`
 
-	// Optional connection pool settings; zero means "use driver default".
+	// 连接池可选配置；为 0 表示使用驱动默认值。
 	MaxOpenConns    int           `json:"max_open_conns" yaml:"max_open_conns"`
 	MaxIdleConns    int           `json:"max_idle_conns" yaml:"max_idle_conns"`
 	ConnMaxLifetime time.Duration `json:"conn_max_lifetime" yaml:"conn_max_lifetime"`
@@ -38,14 +38,13 @@ type tableState struct {
 	done bool
 }
 
-// SqlDB .
 var (
 	sqlDB           *gorm.DB
 	autoCreateTable bool
 	tableStates     syncmap.SyncMap[string, *tableState]
 )
 
-// InitMysql .
+// InitMysql 初始化全局 MySQL 连接与配置。
 func InitMysql(conf MysqlConfig) error {
 	dsnCfg := &mysqlDriver.Config{
 		User:      conf.User,
@@ -65,8 +64,8 @@ func InitMysql(conf MysqlConfig) error {
 	sqlDB, err = gorm.Open(
 		mysql.Open(dsnCfg.FormatDSN()), &gorm.Config{
 			NamingStrategy: schema.NamingStrategy{
-				TablePrefix:   conf.Prefix, // table name prefix
-				SingularTable: true,        // use singular table name
+				TablePrefix:   conf.Prefix, // 表名前缀
+				SingularTable: true,        // 使用单数表名
 			},
 			Logger: logger.Default.LogMode(conf.LogLevel),
 		})
@@ -74,7 +73,7 @@ func InitMysql(conf MysqlConfig) error {
 		return err
 	}
 
-	// Configure connection pool if provided.
+	// 按需配置连接池。
 	if rawDB, err := sqlDB.DB(); err == nil {
 		if conf.MaxOpenConns > 0 {
 			rawDB.SetMaxOpenConns(conf.MaxOpenConns)
@@ -94,7 +93,7 @@ func InitMysql(conf MysqlConfig) error {
 	return nil
 }
 
-// GetDB returns the global *gorm.DB instance; it panics if MySQL hasn't been initialized.
+// GetDB 返回全局 *gorm.DB 实例；未初始化时会 panic。
 func GetDB() *gorm.DB {
 	if sqlDB == nil {
 		panic("MySQL not initialized")
@@ -115,7 +114,7 @@ type TxSession struct {
 	tx   *gorm.DB
 }
 
-// Begin starts a transaction; returns an error if a transaction is already active.
+// Begin 开启事务；如果已有事务则返回错误。
 func (m *TxSession) Begin() error {
 	if m == nil {
 		return errors.New("nil TxSession")
@@ -134,7 +133,7 @@ func (m *TxSession) Begin() error {
 	return nil
 }
 
-// Commit commits the transaction; it can only be called when a transaction is active.
+// Commit 提交事务；只能在事务开启后调用。
 func (m *TxSession) Commit() error {
 	if m == nil {
 		return errors.New("nil TxSession")
@@ -147,7 +146,7 @@ func (m *TxSession) Commit() error {
 	return err
 }
 
-// Rollback rolls back the transaction; it can only be called when a transaction is active.
+// Rollback 回滚事务；只能在事务开启后调用。
 func (m *TxSession) Rollback() error {
 	if m == nil {
 		return errors.New("nil TxSession")
@@ -160,10 +159,10 @@ func (m *TxSession) Rollback() error {
 	return err
 }
 
-// InTx runs fn within a transaction scope.
-// - fn returns error: rollback and return that error (wrap if rollback fails)
-// - fn panics: rollback and re-panic (don't swallow the failure)
-// - fn returns nil: commit
+// InTx 在事务中执行 fn。
+// - fn 返回 error：回滚并返回该 error（回滚失败会追加错误信息）
+// - fn 发生 panic：回滚并继续向上抛出
+// - fn 返回 nil：提交事务
 func (m *TxSession) InTx(fn func(tx *gorm.DB) error) (err error) {
 	if m == nil {
 		return errors.New("nil TxSession")
@@ -201,9 +200,9 @@ func (m *TxSession) IsInTransaction() bool {
 	return m.tx != nil
 }
 
-// DB returns the *gorm.DB that should be used currently:
-// - if a transaction is active: return the transactional handle
-// - otherwise: return the base connection
+// DB 返回当前应使用的 *gorm.DB：
+// - 若事务已开启：返回事务句柄
+// - 否则：返回基础连接
 func (m *TxSession) DB() *gorm.DB {
 	if m == nil {
 		panic("nil TxSession")

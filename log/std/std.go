@@ -1,8 +1,8 @@
 package std
 
 import (
-	"context"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -87,12 +87,12 @@ func (sl *StdLogger) log(level log.Level, msg string, fields ...interface{}) {
 	}
 
 	entry := &log.Entry{
-		Time:    time.Now(),
-		Level:   level,
-		Message: msg,
-		Fields:  fieldMap,
+		Time:          time.Now(),
+		Level:         level,
+		Message:       msg,
+		Fields:        fieldMap,
 		OrderedFields: orderedFields,
-		Caller:  caller,
+		Caller:        caller,
 	}
 
 	sl.writeEntry(entry)
@@ -145,13 +145,13 @@ func (sl *StdLogger) logContext(ctx context.Context, level log.Level, msg string
 	}
 
 	entry := &log.Entry{
-		Time:    time.Now(),
-		Level:   level,
-		Message: msg,
-		Fields:  fieldMap,
+		Time:          time.Now(),
+		Level:         level,
+		Message:       msg,
+		Fields:        fieldMap,
 		OrderedFields: orderedFields,
-		Caller:  caller,
-		Ctx:     ctx,
+		Caller:        caller,
+		Ctx:           ctx,
 	}
 
 	sl.writeEntry(entry)
@@ -181,7 +181,11 @@ func (sl *StdLogger) getCallerInfo(depth int) *log.CallerInfo {
 	// 获取工作目录
 	wd, err := os.Getwd()
 	if err == nil {
-		if rel, err := filepath.Rel(wd, file); err == nil {
+		baseDir := wd
+		if root, ok := findProjectRoot(wd); ok {
+			baseDir = root
+		}
+		if rel, err := filepath.Rel(baseDir, file); err == nil {
 			file = rel
 		}
 	}
@@ -209,6 +213,12 @@ func (sl *StdLogger) writeEntry(entry *log.Entry) {
 	// 当日志级别为 DEBUG 时，无论输出配置是什么，都同时输出到控制台(stdout)。
 	if entry.Level == log.LevelDebug && !hasWriter(writers, os.Stdout) {
 		writers = append(append([]io.Writer(nil), writers...), os.Stdout)
+	}
+
+	for _, w := range writers {
+		if dfw, ok := w.(*dailyFileWriter); ok {
+			_ = dfw.ensureForTime(entry.Time)
+		}
 	}
 
 	for _, w := range writers {
@@ -414,6 +424,42 @@ func (sl *StdLogger) Fatal(msg string, fields ...interface{}) {
 func (sl *StdLogger) Panic(msg string, fields ...interface{}) {
 	sl.log(log.LevelPanic, msg, fields...)
 }
+func (sl *StdLogger) Debugf(format string, args ...interface{}) {
+	sl.log(log.LevelDebug, fmt.Sprintf(format, args...))
+}
+func (sl *StdLogger) Infof(format string, args ...interface{}) {
+	sl.log(log.LevelInfo, fmt.Sprintf(format, args...))
+}
+func (sl *StdLogger) Warnf(format string, args ...interface{}) {
+	sl.log(log.LevelWarn, fmt.Sprintf(format, args...))
+}
+func (sl *StdLogger) Errorf(format string, args ...interface{}) {
+	sl.log(log.LevelError, fmt.Sprintf(format, args...))
+}
+func (sl *StdLogger) Fatalf(format string, args ...interface{}) {
+	sl.log(log.LevelFatal, fmt.Sprintf(format, args...))
+}
+func (sl *StdLogger) Panicf(format string, args ...interface{}) {
+	sl.log(log.LevelPanic, fmt.Sprintf(format, args...))
+}
+func (sl *StdLogger) Debugln(args ...interface{}) {
+	sl.log(log.LevelDebug, lnMessage(args...))
+}
+func (sl *StdLogger) Infoln(args ...interface{}) {
+	sl.log(log.LevelInfo, lnMessage(args...))
+}
+func (sl *StdLogger) Warnln(args ...interface{}) {
+	sl.log(log.LevelWarn, lnMessage(args...))
+}
+func (sl *StdLogger) Errorln(args ...interface{}) {
+	sl.log(log.LevelError, lnMessage(args...))
+}
+func (sl *StdLogger) Fatalln(args ...interface{}) {
+	sl.log(log.LevelFatal, lnMessage(args...))
+}
+func (sl *StdLogger) Panicln(args ...interface{}) {
+	sl.log(log.LevelPanic, lnMessage(args...))
+}
 func (sl *StdLogger) DebugContext(ctx context.Context, msg string, fields ...interface{}) {
 	sl.logContext(ctx, log.LevelDebug, msg, fields...)
 }
@@ -475,23 +521,18 @@ func (sl *StdLogger) SetConfig(config log.Config) error {
 
 	sl.config = config
 	sl.level = config.Level
+	if sl.config.File.Dir == "" {
+		sl.config.File.Dir = "./logs"
+	}
 
 	// 配置输出目标
 	switch config.Output {
 	case "stderr":
 		sl.writers = []io.Writer{os.Stderr}
 	case "file":
-		f, err := os.OpenFile(config.File.Path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-		if err != nil {
-			return err
-		}
-		sl.writers = []io.Writer{f}
+		sl.writers = []io.Writer{newDailyFileWriter(sl.config.File.Dir)}
 	case "combined":
-		f, err := os.OpenFile(config.File.Path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-		if err != nil {
-			return err
-		}
-		sl.writers = []io.Writer{os.Stdout, f}
+		sl.writers = []io.Writer{os.Stdout, newDailyFileWriter(sl.config.File.Dir)}
 	default: // stdout
 		sl.writers = []io.Writer{os.Stdout}
 	}
@@ -524,7 +565,6 @@ func (sl *StdLogger) Name() string {
 func init() {
 	log.Register("std", NewStdLogger)
 }
-
 
 func mergeFields(fieldMap map[string]interface{}, fields ...interface{}) []log.Field {
 	ordered := make([]log.Field, 0, len(fields)/2+1)
@@ -569,6 +609,10 @@ func mergeFields(fieldMap map[string]interface{}, fields ...interface{}) []log.F
 
 func (sl *StdLogger) closeOwnedWritersLocked() {
 	for _, w := range sl.writers {
+		if dfw, ok := w.(*dailyFileWriter); ok {
+			_ = dfw.Close()
+			continue
+		}
 		f, ok := w.(*os.File)
 		if !ok {
 			continue
@@ -578,4 +622,84 @@ func (sl *StdLogger) closeOwnedWritersLocked() {
 		}
 		_ = f.Close()
 	}
+}
+
+type dailyFileWriter struct {
+	mu          sync.Mutex
+	dir         string
+	currentDate string
+	file        *os.File
+}
+
+func newDailyFileWriter(dir string) *dailyFileWriter {
+	if dir == "" {
+		dir = "./logs"
+	}
+	return &dailyFileWriter{dir: dir}
+}
+
+func (w *dailyFileWriter) ensureForTime(t time.Time) error {
+	dateStr := t.Format("2006-01-02")
+	if w.file != nil && w.currentDate == dateStr {
+		return nil
+	}
+
+	if err := os.MkdirAll(w.dir, 0755); err != nil {
+		return err
+	}
+
+	path := filepath.Join(w.dir, dateStr+".log")
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return err
+	}
+
+	if w.file != nil {
+		_ = w.file.Close()
+	}
+
+	w.file = f
+	w.currentDate = dateStr
+	return nil
+}
+
+func (w *dailyFileWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if err := w.ensureForTime(time.Now()); err != nil {
+		return 0, err
+	}
+	return w.file.Write(p)
+}
+
+func (w *dailyFileWriter) Close() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.file == nil {
+		return nil
+	}
+	err := w.file.Close()
+	w.file = nil
+	w.currentDate = ""
+	return err
+}
+
+func lnMessage(args ...interface{}) string {
+	return strings.TrimRight(fmt.Sprintln(args...), "\n")
+}
+
+func findProjectRoot(start string) (string, bool) {
+	dir := start
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir, true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return "", false
 }

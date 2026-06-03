@@ -20,7 +20,7 @@ type RedisCache struct {
 	ctx    context.Context
 }
 
-// NewRedisCache create new redis cache with default collection name.
+// NewRedisCache 创建 Redis 缓存实例。
 func NewRedisCache() cache.Cache {
 	return &RedisCache{}
 }
@@ -32,7 +32,6 @@ func (r *RedisCache) key(k string) string {
 	return r.opts.Prefix + ":" + k
 }
 
-// ---------------- basic ----------------
 
 func (r *RedisCache) Get(key string) (any, error) {
 	b, err := r.client.Get(r.ctx, r.key(key)).Bytes()

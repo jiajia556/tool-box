@@ -19,7 +19,7 @@ type MemoryCache struct {
 	stats cache.Stats
 }
 
-// NewMemoryCache create new memory cache
+// NewMemoryCache 创建内存缓存实例。
 func NewMemoryCache() cache.Cache {
 	return &MemoryCache{
 		items: make(map[string]*item),
@@ -36,7 +36,6 @@ func (m *MemoryCache) Get(key string) (any, error) {
 		return nil, cache.ErrNotFound
 	}
 
-	// 检查是否过期
 	if !item.Expiration.IsZero() && time.Now().After(item.Expiration) {
 		m.stats.Misses++
 		return nil, cache.ErrNotFound
@@ -98,7 +97,6 @@ func (m *MemoryCache) Exists(key string) bool {
 		return false
 	}
 
-	// 检查是否过期
 	if !item.Expiration.IsZero() && time.Now().After(item.Expiration) {
 		return false
 	}
@@ -143,7 +141,7 @@ func (m *MemoryCache) Close() error {
 }
 
 func (m *MemoryCache) Start(config any) error {
-	// 内存缓存不需要配置
+	// 内存缓存不需要额外配置。
 	return nil
 }
 

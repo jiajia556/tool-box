@@ -19,7 +19,7 @@ func TestStdLogger_DebugAlwaysAlsoToStdout(t *testing.T) {
 	cfg.Caller = false
 	cfg.Encoder = "text"
 	cfg.Output = "file"
-	cfg.File.Path = filepath.Join(t.TempDir(), "app.log")
+	cfg.File.Dir = filepath.Join(t.TempDir(), "logs")
 	if err := l.SetConfig(cfg); err != nil {
 		t.Fatalf("SetConfig: %v", err)
 	}
@@ -161,4 +161,3 @@ func TestStdLogger_DebugAlwaysAlsoToStdout(t *testing.T) {
 		}
 	})
 }
-

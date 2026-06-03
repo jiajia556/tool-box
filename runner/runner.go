@@ -19,7 +19,7 @@ type Runner struct {
 
 	waitTracked bool
 
-	// Printf is optional logger (e.g. fmt.Printf). If nil, logging is disabled.
+	// Printf 是可选日志函数（例如 fmt.Printf），为 nil 时不输出日志。
 	Printf func(format string, args ...any) (int, error)
 }
 
@@ -52,7 +52,7 @@ func (r *Runner) Add(task func(context.Context)) {
 func (r *Runner) TrackAdd(delta int) { r.tracked.Add(delta) }
 func (r *Runner) TrackDone()         { r.tracked.Done() }
 
-// Tracker allows tasks to report async work for shutdown coordination.
+// Tracker 用于任务上报异步工作量，便于退出时等待收尾。
 type Tracker interface {
 	TrackAdd(delta int)
 	TrackDone()
@@ -60,7 +60,7 @@ type Tracker interface {
 
 type trackerKey struct{}
 
-// WithTracker attaches a Tracker to the context for task use.
+// WithTracker 将 Tracker 写入 context，供任务内使用。
 func WithTracker(ctx context.Context, t Tracker) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
@@ -68,7 +68,7 @@ func WithTracker(ctx context.Context, t Tracker) context.Context {
 	return context.WithValue(ctx, trackerKey{}, t)
 }
 
-// TrackerFromContext returns the Tracker stored in context.
+// TrackerFromContext 获取 context 中的 Tracker。
 func TrackerFromContext(ctx context.Context) (Tracker, bool) {
 	if ctx == nil {
 		return nil, false
@@ -81,7 +81,7 @@ func TrackerFromContext(ctx context.Context) (Tracker, bool) {
 	return t, ok
 }
 
-// TrackAdd reports new tracked work if a Tracker exists in context.
+// TrackAdd 在 context 中存在 Tracker 时上报新增工作量。
 func TrackAdd(ctx context.Context, delta int) bool {
 	t, ok := TrackerFromContext(ctx)
 	if !ok {
@@ -91,7 +91,7 @@ func TrackAdd(ctx context.Context, delta int) bool {
 	return true
 }
 
-// TrackDone marks a tracked unit as done if a Tracker exists in context.
+// TrackDone 在 context 中存在 Tracker 时标记完成。
 func TrackDone(ctx context.Context) bool {
 	t, ok := TrackerFromContext(ctx)
 	if !ok {
@@ -101,7 +101,7 @@ func TrackDone(ctx context.Context) bool {
 	return true
 }
 
-// SafeTrackAdd is like TrackAdd but recovers from counter panics.
+// SafeTrackAdd 等同于 TrackAdd，但会捕获计数器的 panic。
 func SafeTrackAdd(ctx context.Context, delta int) (ok bool) {
 	t, ok := TrackerFromContext(ctx)
 	if !ok {
@@ -116,7 +116,7 @@ func SafeTrackAdd(ctx context.Context, delta int) (ok bool) {
 	return true
 }
 
-// SafeTrackDone is like TrackDone but recovers from counter panics.
+// SafeTrackDone 等同于 TrackDone，但会捕获计数器的 panic。
 func SafeTrackDone(ctx context.Context) (ok bool) {
 	t, ok := TrackerFromContext(ctx)
 	if !ok {
